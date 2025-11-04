@@ -1,200 +1,235 @@
-<!DOCTYPE html>
-<html lang="zh-TW">
+<!doctype html>
+<html lang="zh-Hant">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>強化版 石頭剪刀布 AI</title>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>猜拳遊戲 進階版</title>
   <style>
-    body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; background-color: #f5f5f5; }
-    h1 { color: #333; }
-    button { margin: 5px; padding: 10px 20px; font-size: 16px; }
-    #result { font-size: 20px; margin-top: 20px; }
-    #aiInfo { color: #666; margin-top: 10px; font-size: 14px; }
-    #scoreboard { margin-top: 20px; }
+    body { font-family: system-ui,"微軟正黑體"; background:#f6f8fa; margin:0; padding:1.2rem; color:#222; }
+    .container { max-width:900px; margin:0 auto; background:#fff; padding:1.2rem; border-radius:10px; box-shadow:0 6px 18px rgba(30,30,30,0.06); }
+    .hidden { display:none; }
+    .choices { display:flex; gap:0.6rem; margin:1rem 0; }
+    .choice-btn { flex:1; padding:0.8rem; border-radius:8px; border:1px solid #ddd; background:linear-gradient(#fff,#f2f4f7); cursor:pointer; font-size:1.05rem; font-weight:600; }
+    .scoreboard { display:flex; gap:0.8rem; margin-top:1rem; }
+    .score-box { flex:1; padding:0.6rem; border-radius:8px; background:#f8fafc; border:1px solid #eef2f7; text-align:center; }
+    .result { margin-top:1rem; padding:0.75rem; border-radius:8px; border:1px dashed #e4e7eb; background:#fcfdff; }
+    .small { font-size:0.85rem; color:#666; }
+    .settings label { display:block; margin-top:0.4rem; font-size:0.9rem; color:#333; }
+    .log { margin-top:1rem; max-height:220px; overflow:auto; padding:0.6rem; background:#fafafa; border-radius:8px; border:1px solid #eee; font-size:0.95rem; white-space:pre-wrap; }
+    button { cursor:pointer; border-radius:6px; border:1px solid #ccc; background:#f9f9f9; padding:0.6rem 1rem; }
   </style>
 </head>
 <body>
-  <h1>石頭剪刀布 AI</h1>
-  <div>
-    <button onclick="playRound('剪刀')">✌️ 剪刀</button>
-    <button onclick="playRound('石頭')">✊ 石頭</button>
-    <button onclick="playRound('布')">🖐 布</button>
+  <div class="container">
+    <h1>猜拳遊戲 進階版</h1>
+
+    <div id="setup">
+      <p class="small">設定參數後開始遊戲。</p>
+      <div class="settings">
+        <label>平滑 α：<input id="alpha" type="number" step="0.1" min="0" value="0.05"></label>
+        <label>探索率 ε：<input id="epsilon" type="number" step="0.01" min="0" max="1" value="0.12"></label>
+        <label>記憶上限：<input id="maxHist" type="number" min="10" value="200"></label>
+        <label>回應模式：
+          <select id="responseMode">
+            <option value="mixed">混合回應</option>
+            <option value="max">硬性反制</option>
+          </select>
+        </label>
+        <button id="startBtn">開始</button>
+      </div>
+    </div>
+
+    <div id="game" class="hidden">
+      <div class="choices">
+        <button class="choice-btn" data-move="scissors">✌️ 剪刀</button>
+        <button class="choice-btn" data-move="rock">🪨 石頭</button>
+        <button class="choice-btn" data-move="paper">🧻 布</button>
+      </div>
+
+      <div class="result">
+        <div id="roundInfo">尚未開始</div>
+        <div id="who" style="font-weight:700;margin-top:0.4rem;"></div>
+        <div id="aiInfo" style="margin-top:0.5rem;font-size:0.95rem;color:#333;"></div>
+      </div>
+
+      <div class="scoreboard">
+        <div class="score-box"><div class="small">你</div><div id="playerScore" style="font-size:1.3rem;font-weight:700;">0</div></div>
+        <div class="score-box"><div class="small">平手</div><div id="drawScore" style="font-size:1.3rem;font-weight:700;">0</div></div>
+        <div class="score-box"><div class="small">電腦</div><div id="computerScore" style="font-size:1.3rem;font-weight:700;">0</div></div>
+      </div>
+
+      <button id="resetBtn" style="margin-top:0.8rem;">重設</button>
+      <div class="log" id="log"><div class="small">遊戲紀錄（最近）</div></div>
+    </div>
   </div>
-  <div id="result"></div>
-  <div id="aiInfo"></div>
-  <div id="scoreboard">玩家 0 : 0 AI</div>
 
   <script>
-    const moves = ['剪刀', '石頭', '布'];
-    const counter = { '剪刀': '石頭', '石頭': '布', '布': '剪刀' };
+    const moves = ['scissors','rock','paper'];
+    const labels = { scissors:'剪刀 ✌️', rock:'石頭 🪨', paper:'布 🧻' };
+    const counter = { scissors:'rock', rock:'paper', paper:'scissors' };
 
-    // 模型資料
-    let playerHistory = [];
-    let trans1 = { '剪刀': {}, '石頭': {}, '布': {} };
-    let trans2 = {};
-    let maxHist = 100;
+    // 參數與狀態
+    let alpha=0.05, epsilon=0.12, maxHist=200, responseMode='mixed';
+    let decayFactor=0.98, repeatThreshold=3, exploitLoseThreshold=3, exploitEpsilon=0.3, exploitEpsilonRounds=5;
+    let exploitCounter=0, loseStreak=0, playerHistory=[], playerScore=0, computerScore=0, drawScore=0;
+    let trans1, trans2, historyLog=[];
 
-    // 防剋參數
-    let decayFactor = 0.98;
-    let repeatThreshold = 3;
-    let exploitLoseThreshold = 3;
-    let exploitEpsilon = 0.3;
-    let exploitEpsilonRounds = 5;
+    const el = n=>document.getElementById(n);
 
-    let exploitCooldown = 0;
-    let aiConsecutiveLoses = 0;
-    let epsilon = 0.05;
-
-    // 分數
-    let playerScore = 0;
-    let aiScore = 0;
-
-    function randomMove() {
-      return moves[Math.floor(Math.random() * moves.length)];
+    function resetCounts(){
+      trans1={scissors:{scissors:0,rock:0,paper:0},rock:{scissors:0,rock:0,paper:0},paper:{scissors:0,rock:0,paper:0}};
+      trans2={};
     }
 
-    function makePairKey(a, b) {
-      return a + '_' + b;
+    function resetAll(){
+      playerHistory=[]; playerScore=computerScore=drawScore=0; historyLog=[];
+      loseStreak=exploitCounter=0; resetCounts();
+      el('playerScore').textContent='0';
+      el('computerScore').textContent='0';
+      el('drawScore').textContent='0';
+      el('roundInfo').textContent='已重設';
+      el('who').textContent=''; el('aiInfo').textContent='';
+      renderLog();
     }
 
-    function updateCountsWithDecay(prev2, prev1, cur) {
-      // 一階衰減
-      for (let a of moves) {
-        for (let b of moves) {
-          trans1[a][b] = (trans1[a][b] || 0) * decayFactor;
+    el('startBtn').addEventListener('click',()=>{
+      alpha=parseFloat(el('alpha').value);
+      epsilon=parseFloat(el('epsilon').value);
+      maxHist=parseInt(el('maxHist').value,10);
+      responseMode=el('responseMode').value;
+      resetAll(); el('setup').classList.add('hidden'); el('game').classList.remove('hidden');
+    });
+
+    el('resetBtn').addEventListener('click',()=>resetAll());
+
+    function randomMove(){ return moves[Math.floor(Math.random()*3)]; }
+
+    function decayCounts(){
+      for(let p of moves) for(let q of moves){
+        trans1[p][q]*=decayFactor;
+      }
+      for(let k in trans2){
+        for(let m of moves) trans2[k][m]*=decayFactor;
+      }
+    }
+
+    function getFirstOrderProbs(prev){
+      const c=trans1[prev]; let s=0,p={};
+      for(let m of moves){ p[m]=(c[m]||0)+alpha; s+=p[m]; }
+      for(let m of moves) p[m]/=s; return p;
+    }
+
+    function getSecondOrderProbs(p2,p1){
+      const key=p2+'|'+p1; const c=trans2[key]||{scissors:0,rock:0,paper:0};
+      let s=0,p={}; for(let m of moves){ p[m]=(c[m]||0)+alpha; s+=p[m]; }
+      for(let m of moves) p[m]/=s; return p;
+    }
+
+    function aiChoose(){
+      const n=playerHistory.length;
+      let effEpsilon=epsilon;
+      if(loseStreak>=exploitLoseThreshold){ effEpsilon=exploitEpsilon; exploitCounter=exploitEpsilonRounds; loseStreak=0; }
+      if(exploitCounter>0){ effEpsilon=exploitEpsilon; exploitCounter--; }
+
+      if(n<2 || Math.random()<effEpsilon) return {move:randomMove(),mode:'random'};
+
+      const prev1=playerHistory[n-1], prev2=playerHistory[n-2];
+      const key=prev2+'|'+prev1;
+      const pairExists=trans2[key] && (trans2[key].scissors+trans2[key].rock+trans2[key].paper>0);
+      const probs=pairExists?getSecondOrderProbs(prev2,prev1):getFirstOrderProbs(prev1);
+      let finalMove;
+
+      // 若玩家連續出同手，AI 嘗試反制
+      let repeatCount=1;
+      for(let i=n-2;i>=0&&playerHistory[i]===prev1;i--) repeatCount++;
+      if(repeatCount>=repeatThreshold){
+        finalMove=counter[prev1];
+        return {move:finalMove,mode:'pattern',probs:probs};
+      }
+
+      if(responseMode==='max'){
+        let maxP=-1,cands=[];
+        for(let m of moves){
+          if(probs[m]>maxP){maxP=probs[m];cands=[m];}
+          else if(probs[m]===maxP)cands.push(m);
         }
-      }
-      // 二階衰減
-      for (let k in trans2) {
-        for (let m of moves) {
-          trans2[k][m] = (trans2[k][m] || 0) * decayFactor;
-        }
-      }
-      // 加入新觀察
-      if (prev1) trans1[prev1][cur] = (trans1[prev1][cur] || 0) + 1;
-      if (prev2 && prev1) {
-        const key = makePairKey(prev2, prev1);
-        if (!trans2[key]) trans2[key] = { '剪刀': 0, '石頭': 0, '布': 0 };
-        trans2[key][cur] = (trans2[key][cur] || 0) + 1;
+        const predicted=cands[Math.floor(Math.random()*cands.length)];
+        finalMove=counter[predicted];
+        return {move:finalMove,mode:'max',probs:probs,predicted:predicted};
+      }else{
+        const w={scissors:0,rock:0,paper:0};
+        for(let pm of moves) w[counter[pm]]+=probs[pm];
+        const r=Math.random(); let cum=0;
+        for(let m of moves){ cum+=w[m]; if(r<=cum)return{move:m,mode:'mixed',probs:probs,aiWeights:w}; }
+        return {move:randomMove(),mode:'mixed',probs:probs,aiWeights:w};
       }
     }
 
-    function detectRepeat() {
-      const n = playerHistory.length;
-      if (n >= repeatThreshold) {
-        const last = playerHistory[n - 1];
-        for (let i = 1; i < repeatThreshold; i++) {
-          if (playerHistory[n - 1 - i] !== last) return null;
-        }
-        return last;
+    function updateCounts(p2,p1,c){
+      if(p1) trans1[p1][c]=(trans1[p1][c]||0)+1;
+      if(p2&&p1){
+        const k=p2+'|'+p1;
+        if(!trans2[k]) trans2[k]={scissors:0,rock:0,paper:0};
+        trans2[k][c]=(trans2[k][c]||0)+1;
       }
-      return null;
     }
 
-    function getBlendedProbs(prev2, prev1, weight2 = 5) {
-      let probs1 = { '剪刀': 1, '石頭': 1, '布': 1 };
-      let probs2 = { '剪刀': 1, '石頭': 1, '布': 1 };
-
-      if (prev1 && trans1[prev1]) {
-        const t1 = trans1[prev1];
-        for (let m of moves) probs1[m] += t1[m] || 0;
-      }
-
-      if (prev2 && prev1) {
-        const key = makePairKey(prev2, prev1);
-        if (trans2[key]) {
-          const t2 = trans2[key];
-          for (let m of moves) probs2[m] += t2[m] || 0;
-        }
-      }
-
-      const sum1 = moves.reduce((s, m) => s + probs1[m], 0);
-      const sum2 = moves.reduce((s, m) => s + probs2[m], 0);
-      for (let m of moves) {
-        probs1[m] /= sum1;
-        probs2[m] /= sum2;
-      }
-
-      const probs = {};
-      for (let m of moves) {
-        probs[m] = (probs1[m] + weight2 * probs2[m]) / (1 + weight2);
-      }
-      return probs;
+    function decideOutcome(p,c){
+      if(p===c) return 'draw';
+      const winPairs={scissors:'paper',rock:'scissors',paper:'rock'};
+      return winPairs[p]===c?'win':'lose';
     }
 
-    function aiChoose() {
-      const n = playerHistory.length;
-      let currentEpsilon = epsilon;
-      if (exploitCooldown > 0) {
-        currentEpsilon = Math.max(currentEpsilon, exploitEpsilon);
-        exploitCooldown--;
-      }
-
-      // 偵測重複
-      const repeatMove = detectRepeat();
-      if (repeatMove) {
-        return { move: counter[repeatMove], probs: null, mode: 'anti-repeat' };
-      }
-
-      if (n < 1 || Math.random() < currentEpsilon) {
-        return { move: randomMove(), probs: null, mode: 'random' };
-      }
-
-      const prev1 = playerHistory[n - 1];
-      const prev2 = n >= 2 ? playerHistory[n - 2] : null;
-      const blend = getBlendedProbs(prev2, prev1, 5);
-
-      // 找最大機率
-      let maxMove = moves[0];
-      for (let m of moves) {
-        if (blend[m] > blend[maxMove]) maxMove = m;
-      }
-
-      return { move: counter[maxMove], probs: blend, mode: 'predictive' };
-    }
-
-    function playRound(playerMove) {
-      const n = playerHistory.length;
-      const prev1 = n >= 1 ? playerHistory[n - 1] : null;
-      const prev2 = n >= 2 ? playerHistory[n - 2] : null;
-
-      const ai = aiChoose();
-      const aiMove = ai.move;
-
-      // 判定輸贏
-      let outcome = '';
-      if (playerMove === aiMove) outcome = '平手';
-      else if (counter[playerMove] === aiMove) outcome = 'AI 勝';
-      else outcome = '玩家勝';
-
-      if (outcome === 'AI 勝') {
-        aiScore++;
-        aiConsecutiveLoses = 0;
-      } else if (outcome === '玩家勝') {
-        playerScore++;
-        aiConsecutiveLoses++;
-      } else aiConsecutiveLoses = 0;
-
-      if (aiConsecutiveLoses >= exploitLoseThreshold) {
-        exploitCooldown = exploitEpsilonRounds;
-        aiConsecutiveLoses = 0;
-      }
-
-      updateCountsWithDecay(prev2, prev1, playerMove);
+    function playRound(playerMove){
+      decayCounts();
+      const aiDec=aiChoose();
+      const compMove=aiDec.move;
+      const n=playerHistory.length;
+      const p1=n>=1?playerHistory[n-1]:null;
+      const p2=n>=2?playerHistory[n-2]:null;
+      updateCounts(p2,p1,playerMove);
       playerHistory.push(playerMove);
-      if (playerHistory.length > maxHist) playerHistory.shift();
+      if(playerHistory.length>maxHist)playerHistory.shift();
 
-      document.getElementById('result').innerText = `你出 ${playerMove}，AI 出 ${aiMove} → ${outcome}`;
-      document.getElementById('scoreboard').innerText = `玩家 ${playerScore} : ${aiScore} AI`;
+      const outcome=decideOutcome(playerMove,compMove);
+      if(outcome==='win'){playerScore++;loseStreak=0;}
+      else if(outcome==='lose'){computerScore++;loseStreak++;}
+      else drawScore++;
+      el('playerScore').textContent=playerScore;
+      el('computerScore').textContent=computerScore;
+      el('drawScore').textContent=drawScore;
 
-      if (ai.probs) {
-        const pText = moves.map(m => `${m}:${(ai.probs[m]*100).toFixed(1)}%`).join(' | ');
-        document.getElementById('aiInfo').innerText = `AI 模式: ${ai.mode}，預測機率: ${pText}`;
-      } else {
-        document.getElementById('aiInfo').innerText = `AI 模式: ${ai.mode}`;
+      el('roundInfo').textContent=`你出 ${labels[playerMove]}，電腦出 ${labels[compMove]}。`;
+      el('who').textContent=outcome==='win'?'你贏了':outcome==='lose'?'你輸了':'平手';
+      el('who').style.color=outcome==='win'?'#0b8457':outcome==='lose'?'#c62828':'#444';
+
+      if(aiDec.mode==='random'){ el('aiInfo').textContent='AI 使用隨機策略。'; }
+      else if(aiDec.mode==='pattern'){ el('aiInfo').textContent='AI 偵測到重複出拳，採取反制。'; }
+      else if(aiDec.mode==='max'){
+        const p=aiDec.probs;
+        el('aiInfo').textContent=`玩家機率：剪刀 ${(p.scissors*100).toFixed(1)}%、石頭 ${(p.rock*100).toFixed(1)}%、布 ${(p.paper*100).toFixed(1)}%。`;
+      }else{
+        const p=aiDec.probs,w=aiDec.aiWeights;
+        el('aiInfo').textContent=`玩家機率：剪刀 ${(p.scissors*100).toFixed(1)}%、石頭 ${(p.rock*100).toFixed(1)}%、布 ${(p.paper*100).toFixed(1)}%；AI 權重：剪刀 ${(w.scissors*100).toFixed(1)}%、石頭 ${(w.rock*100).toFixed(1)}%、布 ${(w.paper*100).toFixed(1)}%。`;
       }
+
+      const t=new Date().toLocaleTimeString();
+      historyLog.unshift(`${t} — 你：${labels[playerMove]}，電腦：${labels[compMove]} → ${outcome==='win'?'你贏':outcome==='lose'?'你輸':'平手'}`);
+      if(historyLog.length>300)historyLog.pop();
+      renderLog();
     }
+
+    function renderLog(){
+      const log=el('log');
+      log.innerHTML='<div class="small">遊戲紀錄（最近）</div>';
+      for(const d of historyLog){ const div=document.createElement('div'); div.textContent=d; log.appendChild(div); }
+    }
+
+    document.querySelectorAll('.choice-btn').forEach(b=>{
+      b.addEventListener('click',()=>playRound(b.getAttribute('data-move')));
+    });
+
+    resetAll();
   </script>
 </body>
 </html>
-
