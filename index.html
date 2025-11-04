@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="zh-Hant">
 <head>
@@ -62,7 +61,6 @@
   </div>
 
   <script>
-    // 參考與變數
     const moves = ['scissors','rock','paper'];
     const labels = { 'scissors': '剪刀 ✌️', 'rock': '石頭 🪨', 'paper': '布 🧻' };
 
@@ -96,10 +94,9 @@
       'rock': {'scissors':0,'rock':0,'paper':0},
       'paper': {'scissors':0,'rock':0,'paper':0}
     };
-    let prevPlayer = null;
+    let prevPlayer = null; // 上一手（最初為 null）
     const historyLog = [];
 
-    // 決勝規則
     function decideOutcome(player, comp) {
       if (player === comp) return 'draw';
       const winPairs = {'scissors':'paper','rock':'scissors','paper':'rock'};
@@ -107,7 +104,6 @@
     }
     function randomMove() { return moves[Math.floor(Math.random()*moves.length)]; }
 
-    // 更新 transitionCounts（當玩家從 prev -> cur）
     function updateTransition(prev, cur) {
       if (prev === null) return;
       if (transitionCounts[prev] && transitionCounts[prev].hasOwnProperty(cur)) {
@@ -115,7 +111,6 @@
       }
     }
 
-    // 從 prev 狀態計算條件分布 P(next | prev)（含平滑）
     function getConditionalProbs(prev) {
       const counts = transitionCounts[prev];
       const probs = {};
@@ -128,17 +123,16 @@
       return probs;
     }
 
-    // AI 選擇（使用馬可夫鏈）
-    function aiChoose() {
+    // AI 選擇（使用馬可夫鏈），接收 prev 作為上一手（可能為 null）
+    function aiChoose(prev) {
       // 如果沒有上一手或以 epsilon 探索 -> 隨機
-      if (prevPlayer === null || Math.random() < epsilon) {
+      if (prev === null || Math.random() < epsilon) {
         return { move: randomMove(), mode: 'random' };
       }
 
-      const probs = getConditionalProbs(prevPlayer); // P(next | prevPlayer)
+      const probs = getConditionalProbs(prev); // P(next | prev)
 
       if (responseMode === 'max') {
-        // 找出最大機率的玩家下一手（若多個最大則隨機從中選一）
         let maxP = -1;
         const cands = [];
         for (const m of moves) {
@@ -150,40 +144,38 @@
         const counter = { 'scissors':'rock', 'rock':'paper', 'paper':'scissors' };
         return { move: counter[predicted], mode: 'max', probs, predicted };
       } else {
-        // 混合回應：對玩家每個可能手勢 j，以其機率 p_j 選擇對應的 counter(j) -> 合併成 AI 的分布
         const counter = { 'scissors':'rock', 'rock':'paper', 'paper':'scissors' };
-        // 計算 AI 每個手勢的權重
         const aiWeights = { 'scissors':0, 'rock':0, 'paper':0 };
         for (const j of moves) {
           const aiMove = counter[j];
           aiWeights[aiMove] += probs[j];
         }
-        // 依權重抽樣出拳
+        // 抽樣
         const r = Math.random();
         let cum = 0;
         for (const m of moves) {
           cum += aiWeights[m];
           if (r <= cum + 1e-12) return { move: m, mode:'mixed', probs, aiWeights };
         }
-        // 保險回退
         return { move: randomMove(), mode:'mixed', probs, aiWeights };
       }
     }
 
     // playRound：玩家出 playerMove
     function playRound(playerMove) {
-      // 更新 transition
-      updateTransition(prevPlayer, playerMove);
-      // 記錄 playerHistory 與 prevPlayer
+      // 在更新 transition 與 prevPlayer 之前，用「上一手 prevPlayer」讓 AI 做預測
+      const prev = prevPlayer; // prev 是「上一手」（可能為 null）
+      const aiDec = aiChoose(prev);
+      const compMove = aiDec.move;
+
+      // 更新 transitionCounts（prev -> current）
+      updateTransition(prev, playerMove);
+      // 記錄 playerHistory 與更新 prevPlayer
       playerHistory.push(playerMove);
       if (playerHistory.length > maxHist) playerHistory.shift();
       prevPlayer = playerMove;
 
-      // AI 決策
-      const aiDec = aiChoose();
-      const compMove = aiDec.move;
       const outcome = decideOutcome(playerMove, compMove);
-
       if (outcome === 'win') playerScore++;
       else if (outcome === 'lose') computerScore++;
       else drawScore++;
@@ -200,14 +192,14 @@
 
       // AI 資訊顯示
       if (aiDec.mode === 'random') {
-        aiInfoEl.textContent = `AI 使用隨機策略（探索或無前一手）。`;
+        aiInfoEl.textContent = `AI 使用隨機策略（探索或無上一手）。`;
       } else if (aiDec.mode === 'max') {
         const p = aiDec.probs;
-        aiInfoEl.textContent = `AI 預測你在上一手 labels[aiDec.predicted]後下一手機率：剪刀{labels[aiDec.predicted]} 後下一手機率：剪刀labels[aiDec.predicted]後下一手機率：剪刀{(p.scissors*100).toFixed(1)}%、石頭 (p.rock∗100).toFixed(1){(p.rock*100).toFixed(1)}%、布(p.rock∗100).toFixed(1){(p.paper*100).toFixed(1)}%；AI 對最大者硬性反制 ${labels[compMove]}。`;
+        aiInfoEl.textContent = `AI 預測你在上一手後的條件機率：剪刀 (p.scissors∗100).toFixed(1){(p.scissors*100).toFixed(1)}%、石頭(p.scissors∗100).toFixed(1){(p.rock*100).toFixed(1)}%、布 (p.paper∗100).toFixed(1){(p.paper*100).toFixed(1)}%；AI 對最大者硬性反制(p.paper∗100).toFixed(1){labels[compMove]}。`;
       } else if (aiDec.mode === 'mixed') {
         const p = aiDec.probs;
         const w = aiDec.aiWeights;
-        aiInfoEl.textContent = `AI 根據上一手的條件機率混合回應。玩家條件機率：剪刀 (p.scissors∗100).toFixed(1){(p.scissors*100).toFixed(1)}%、石頭(p.scissors∗100).toFixed(1){(p.rock*100).toFixed(1)}%、布 (p.paper∗100).toFixed(1){(p.paper*100).toFixed(1)}%。AI 出拳權重：剪刀(p.paper∗100).toFixed(1){(w.scissors*100).toFixed(1)}%、石頭 (w.rock∗100).toFixed(1){(w.rock*100).toFixed(1)}%、布(w.rock∗100).toFixed(1){(w.paper*100).toFixed(1)}%。`;
+        aiInfoEl.textContent = `AI 根據上一手混合回應。玩家條件機率：剪刀 (p.scissors∗100).toFixed(1){(p.scissors*100).toFixed(1)}%、石頭(p.scissors∗100).toFixed(1){(p.rock*100).toFixed(1)}%、布 (p.paper∗100).toFixed(1){(p.paper*100).toFixed(1)}%。AI 出拳權重：剪刀(p.paper∗100).toFixed(1){(w.scissors*100).toFixed(1)}%、石頭 (w.rock∗100).toFixed(1){(w.rock*100).toFixed(1)}%、布(w.rock∗100).toFixed(1){(w.paper*100).toFixed(1)}%。`;
       }
 
       // 紀錄 log
