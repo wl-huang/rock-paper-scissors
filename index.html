@@ -42,15 +42,11 @@
     <div class="explain">
       <strong>參數說明（簡明）</strong>
       <div class="muted">
-        平滑 α（alpha）：當我們計算「在上一手為 i 時，下一手為 j 的條件機率」時，我們會把計數加上平滑常數 α，避免某些轉移在資料不足時變成 0。若在上一手 i 的計數為 C_{ij}，我們估計：
-        <div style="margin-top:6px; margin-bottom:6px;">
-          LaTeX: P(\text{next}=j \mid \text{prev}=i) = \dfrac{C_{ij} + \alpha}{\sum_{k}(C_{ik} + \alpha)}
-        </div>
-        實務建議：若希望 AI 在資料少時較不確定，可用 α=1（加一平滑）；若想讓 AI 更快依照實際計數，可用較小的 α（例如 0.1）。
+        平滑 α（alpha）：計算條件機率時把計數加上 α，公式為：P(next=j | prev=i) = (C_{ij} + α) / Σ_k (C_{ik} + α)。
+        建議 α=1 為常用的「加一平滑」，若要 AI 更快反映真實次數可減小 α（例如 0.1）。
       </div>
-
       <div class="muted" style="margin-top:8px;">
-        探索率 ε（epsilon）：AI 以 ε 的機率「隨機出拳」以增加不確定性、避免被玩家長期反制；以 1-ε 的機率使用馬可夫機率做決策。實務建議：ε 可設 0.05～0.2 之間（較高會更隨機）。
+        探索率 ε（epsilon）：AI 以 ε 機率隨機出拳（探索），以 1-ε 機率使用馬可夫估計做決策。建議 ε 約 0.05~0.2。
       </div>
     </div>
 
@@ -78,45 +74,45 @@
   </div>
 
   <script>
-    const moves = ['scissors','rock','paper'];
-    const labels = { 'scissors': '剪刀 ✌️', 'rock': '石頭 🪨', 'paper': '布 🧻' };
+    var moves = ['scissors','rock','paper'];
+    var labels = { 'scissors': '剪刀 ✌️', 'rock': '石頭 🪨', 'paper': '布 🧻' };
 
     // DOM
-    const alphaInput = document.getElementById('alpha');
-    const epsilonInput = document.getElementById('epsilon');
-    const maxHistInput = document.getElementById('maxHist');
-    const responseModeEl = document.getElementById('responseMode');
-    const applyBtn = document.getElementById('apply');
-    const resetBtn = document.getElementById('resetBtn');
+    var alphaInput = document.getElementById('alpha');
+    var epsilonInput = document.getElementById('epsilon');
+    var maxHistInput = document.getElementById('maxHist');
+    var responseModeEl = document.getElementById('responseMode');
+    var applyBtn = document.getElementById('apply');
+    var resetBtn = document.getElementById('resetBtn');
 
-    const roundInfoEl = document.getElementById('roundInfo');
-    const whoEl = document.getElementById('who');
-    const aiInfoEl = document.getElementById('aiInfo');
-    const logEl = document.getElementById('log');
-    const playerScoreEl = document.getElementById('playerScore');
-    const computerScoreEl = document.getElementById('computerScore');
-    const drawScoreEl = document.getElementById('drawScore');
+    var roundInfoEl = document.getElementById('roundInfo');
+    var whoEl = document.getElementById('who');
+    var aiInfoEl = document.getElementById('aiInfo');
+    var logEl = document.getElementById('log');
+    var playerScoreEl = document.getElementById('playerScore');
+    var computerScoreEl = document.getElementById('computerScore');
+    var drawScoreEl = document.getElementById('drawScore');
 
     // 參數
-    let alpha = parseFloat(alphaInput.value) || 1.0;
-    let epsilon = parseFloat(epsilonInput.value) || 0.12;
-    let maxHist = parseInt(maxHistInput.value, 10) || 200;
-    let responseMode = responseModeEl.value; // 'mixed' or 'max'
+    var alpha = parseFloat(alphaInput.value) || 1.0;
+    var epsilon = parseFloat(epsilonInput.value) || 0.12;
+    var maxHist = parseInt(maxHistInput.value, 10) || 200;
+    var responseMode = responseModeEl.value; // 'mixed' or 'max'
 
     // 記錄
-    let playerScore = 0, computerScore = 0, drawScore = 0;
-    let playerHistory = []; // 連續玩家手勢記錄
-    const transitionCounts = {
+    var playerScore = 0, computerScore = 0, drawScore = 0;
+    var playerHistory = [];
+    var transitionCounts = {
       'scissors': {'scissors':0,'rock':0,'paper':0},
       'rock': {'scissors':0,'rock':0,'paper':0},
       'paper': {'scissors':0,'rock':0,'paper':0}
     };
-    let prevPlayer = null; // 上一手（最初為 null）
-    const historyLog = [];
+    var prevPlayer = null;
+    var historyLog = [];
 
     function decideOutcome(player, comp) {
       if (player === comp) return 'draw';
-      const winPairs = {'scissors':'paper','rock':'scissors','paper':'rock'};
+      var winPairs = {'scissors':'paper','rock':'scissors','paper':'rock'};
       return winPairs[player] === comp ? 'win' : 'lose';
     }
     function randomMove() { return moves[Math.floor(Math.random()*moves.length)]; }
@@ -129,137 +125,131 @@
     }
 
     function getConditionalProbs(prev) {
-      const counts = transitionCounts[prev];
-      const probs = {};
-      let total = 0;
-      for (const m of moves) {
+      var counts = transitionCounts[prev];
+      var probs = {};
+      var total = 0;
+      for (var i=0;i<moves.length;i++){
+        var m = moves[i];
         probs[m] = (counts[m] || 0) + alpha;
         total += probs[m];
       }
-      for (const m of moves) probs[m] = probs[m] / total;
+      for (var i=0;i<moves.length;i++){
+        var m = moves[i];
+        probs[m] = probs[m] / total;
+      }
       return probs;
     }
 
-    // AI 選擇（使用馬可夫鏈），接收 prev 作為上一手（可能為 null）
     function aiChoose(prev) {
-      // 如果沒有上一手或以 epsilon 探索 -> 隨機
       if (prev === null || Math.random() < epsilon) {
         return { move: randomMove(), mode: 'random' };
       }
-
-      const probs = getConditionalProbs(prev); // P(next | prev)
-
+      var probs = getConditionalProbs(prev);
       if (responseMode === 'max') {
-        let maxP = -1;
-        const cands = [];
-        for (const m of moves) {
-          const p = probs[m];
-          if (p > maxP + 1e-12) { maxP = p; cands.length = 0; cands.push(m); }
+        var maxP = -1;
+        var cands = [];
+        for (var i=0;i<moves.length;i++){
+          var m = moves[i];
+          var p = probs[m];
+          if (p > maxP + 1e-12) { maxP = p; cands = [m]; }
           else if (Math.abs(p - maxP) < 1e-12) { cands.push(m); }
         }
-        const predicted = cands[Math.floor(Math.random()*cands.length)];
-        const counter = { 'scissors':'rock', 'rock':'paper', 'paper':'scissors' };
-        return { move: counter[predicted], mode: 'max', probs, predicted };
+        var predicted = cands[Math.floor(Math.random()*cands.length)];
+        var counter = { 'scissors':'rock', 'rock':'paper', 'paper':'scissors' };
+        return { move: counter[predicted], mode: 'max', probs: probs, predicted: predicted };
       } else {
-        const counter = { 'scissors':'rock', 'rock':'paper', 'paper':'scissors' };
-        const aiWeights = { 'scissors':0, 'rock':0, 'paper':0 };
-        for (const j of moves) {
-          const aiMove = counter[j];
-          aiWeights[aiMove] += probs[j];
+        var counter = { 'scissors':'rock', 'rock':'paper', 'paper':'scissors' };
+        var aiWeights = { 'scissors':0, 'rock':0, 'paper':0 };
+        for (var j=0;j<moves.length;j++){
+          var jj = moves[j];
+          var aiMove = counter[jj];
+          aiWeights[aiMove] += probs[jj];
         }
-        // 抽樣
-        const r = Math.random();
-        let cum = 0;
-        for (const m of moves) {
-          cum += aiWeights[m];
-          if (r <= cum + 1e-12) return { move: m, mode:'mixed', probs, aiWeights };
+        var r = Math.random();
+        var cum = 0;
+        for (var k=0;k<moves.length;k++){
+          var mm = moves[k];
+          cum += aiWeights[mm];
+          if (r <= cum + 1e-12) return { move: mm, mode:'mixed', probs: probs, aiWeights: aiWeights };
         }
-        return { move: randomMove(), mode:'mixed', probs, aiWeights };
+        return { move: randomMove(), mode:'mixed', probs: probs, aiWeights: aiWeights };
       }
     }
 
-    // playRound：玩家出 playerMove
     function playRound(playerMove) {
-      // 在更新 transition 與 prevPlayer 之前，用「上一手 prevPlayer」讓 AI 做預測
-      const prev = prevPlayer; // prev 是「上一手」（可能為 null）
-      const aiDec = aiChoose(prev);
-      const compMove = aiDec.move;
+      var prev = prevPlayer;
+      var aiDec = aiChoose(prev);
+      var compMove = aiDec.move;
 
-      // 更新 transitionCounts（prev -> current）
       updateTransition(prev, playerMove);
-      // 記錄 playerHistory 與更新 prevPlayer
       playerHistory.push(playerMove);
       if (playerHistory.length > maxHist) playerHistory.shift();
       prevPlayer = playerMove;
 
-      const outcome = decideOutcome(playerMove, compMove);
+      var outcome = decideOutcome(playerMove, compMove);
       if (outcome === 'win') playerScore++;
       else if (outcome === 'lose') computerScore++;
       else drawScore++;
 
-      // 更新 UI
       playerScoreEl.textContent = playerScore;
       computerScoreEl.textContent = computerScore;
       drawScoreEl.textContent = drawScore;
 
-      roundInfoEl.textContent = `你出 labels[playerMove]，電腦出{labels[playerMove]}，電腦出labels[playerMove]，電腦出{labels[compMove]}。`;
+      roundInfoEl.textContent = '你出 ' + labels[playerMove] + '，電腦出 ' + labels[compMove] + '。';
       if (outcome === 'win') { whoEl.textContent = '你贏了 🎉'; whoEl.style.color = '#0b8457'; }
       else if (outcome === 'lose') { whoEl.textContent = '你輸了 😞'; whoEl.style.color = '#c62828'; }
       else { whoEl.textContent = '平手 🤝'; whoEl.style.color = '#444'; }
 
-      // AI 資訊顯示
       if (aiDec.mode === 'random') {
-        aiInfoEl.textContent = `AI 使用隨機策略（探索或無上一手）。`;
+        aiInfoEl.textContent = 'AI 使用隨機策略（探索或無上一手）。';
       } else if (aiDec.mode === 'max') {
-        const p = aiDec.probs;
-        aiInfoEl.textContent = `AI 預測你在上一手後的條件機率：剪刀 (p.scissors∗100).toFixed(1){(p.scissors*100).toFixed(1)}%、石頭(p.scissors∗100).toFixed(1){(p.rock*100).toFixed(1)}%、布 (p.paper∗100).toFixed(1){(p.paper*100).toFixed(1)}%；AI 對最大者硬性反制(p.paper∗100).toFixed(1){labels[compMove]}。`;
+        var p = aiDec.probs;
+        aiInfoEl.textContent = 'AI 預測你在上一手後的條件機率：剪刀 ' + (p.scissors*100).toFixed(1) + '%、石頭 ' + (p.rock*100).toFixed(1) + '%、布 ' + (p.paper*100).toFixed(1) + '%；AI 對最大者硬性反制 ' + labels[compMove] + '。';
       } else if (aiDec.mode === 'mixed') {
-        const p = aiDec.probs;
-        const w = aiDec.aiWeights;
-        aiInfoEl.textContent = `AI 根據上一手混合回應。玩家條件機率：剪刀 (p.scissors∗100).toFixed(1){(p.scissors*100).toFixed(1)}%、石頭(p.scissors∗100).toFixed(1){(p.rock*100).toFixed(1)}%、布 (p.paper∗100).toFixed(1){(p.paper*100).toFixed(1)}%。AI 出拳權重：剪刀(p.paper∗100).toFixed(1){(w.scissors*100).toFixed(1)}%、石頭 (w.rock∗100).toFixed(1){(w.rock*100).toFixed(1)}%、布(w.rock∗100).toFixed(1){(w.paper*100).toFixed(1)}%。`;
+        var p2 = aiDec.probs;
+        var w = aiDec.aiWeights;
+        aiInfoEl.textContent = 'AI 根據上一手混合回應。玩家條件機率：剪刀 ' + (p2.scissors*100).toFixed(1) + '%、石頭 ' + (p2.rock*100).toFixed(1) + '%、布 ' + (p2.paper*100).toFixed(1) + '%。AI 出拳權重：剪刀 ' + (w.scissors*100).toFixed(1) + '%、石頭 ' + (w.rock*100).toFixed(1) + '%、布 ' + (w.paper*100).toFixed(1) + '%。';
       }
 
-      // 紀錄 log
-      const t = new Date().toLocaleTimeString();
-      historyLog.unshift(`t—你：{t} — 你：t—你：{labels[playerMove]}，電腦：labels[compMove]→{labels[compMove]} →labels[compMove]→{outcome === 'win' ? '你贏' : outcome === 'lose' ? '你輸' : '平手'}`);
+      var t = new Date().toLocaleTimeString();
+      historyLog.unshift(t + ' — 你：' + labels[playerMove] + '，電腦：' + labels[compMove] + ' → ' + (outcome === 'win' ? '你贏' : outcome === 'lose' ? '你輸' : '平手'));
       if (historyLog.length > 300) historyLog.pop();
       renderLog();
     }
 
     function renderLog() {
       logEl.innerHTML = '<div class="small">遊戲紀錄（最近記錄）</div>';
-      for (const line of historyLog) {
-        const d = document.createElement('div');
-        d.textContent = line;
+      for (var i=0;i<historyLog.length;i++){
+        var d = document.createElement('div');
+        d.textContent = historyLog[i];
         logEl.appendChild(d);
       }
     }
 
-    // 綁定 UI
-    document.querySelectorAll('.choice-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const mv = btn.getAttribute('data-move');
+    document.querySelectorAll('.choice-btn').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var mv = btn.getAttribute('data-move');
         playRound(mv);
       });
     });
 
-    applyBtn.addEventListener('click', () => {
-      const na = parseFloat(alphaInput.value);
-      const ne = parseFloat(epsilonInput.value);
-      const nm = parseInt(maxHistInput.value, 10);
-      const mode = responseModeEl.value;
+    applyBtn.addEventListener('click', function(){
+      var na = parseFloat(alphaInput.value);
+      var ne = parseFloat(epsilonInput.value);
+      var nm = parseInt(maxHistInput.value, 10);
+      var mode = responseModeEl.value;
       if (isNaN(na) || na < 0) { alert('請輸入有效的 α（>=0）'); return; }
       if (isNaN(ne) || ne < 0 || ne > 1) { alert('請輸入有效的 ε（0~1）'); return; }
       if (!Number.isInteger(nm) || nm < 10) { alert('請輸入有效的最大記錄長度（>=10）'); return; }
       alpha = na; epsilon = ne; maxHist = nm; responseMode = mode;
-      alert(`已套用：α=alpha,ε={alpha}, ε=alpha,ε={epsilon}, maxHist=maxHist,mode={maxHist}, mode=maxHist,mode={responseMode}`);
+      alert('已套用：α=' + alpha + ', ε=' + epsilon + ', maxHist=' + maxHist + ', mode=' + responseMode);
     });
 
-    resetBtn.addEventListener('click', () => {
+    resetBtn.addEventListener('click', function(){
       if (!confirm('確定要重設比分與 AI 紀錄嗎？')) return;
       playerScore = 0; computerScore = 0; drawScore = 0;
       playerHistory.length = 0; prevPlayer = null;
-      for (const a of moves) for (const b of moves) transitionCounts[a][b] = 0;
+      for (var a in transitionCounts) for (var b in transitionCounts[a]) transitionCounts[a][b] = 0;
       historyLog.length = 0;
       playerScoreEl.textContent = '0'; computerScoreEl.textContent = '0'; drawScoreEl.textContent = '0';
       roundInfoEl.textContent = '已重設';
@@ -267,9 +257,7 @@
       renderLog();
     });
 
-    // 初始化
     renderLog();
   </script>
 </body>
 </html>
-
