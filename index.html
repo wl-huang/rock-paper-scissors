@@ -91,34 +91,59 @@ function getFirstOrderProbs(prev){let counts=trans1[prev], probs={}, sum=0; for(
 function getSecondOrderProbs(prev2,prev1){const key=makePairKey(prev2,prev1), counts=trans2[key]||{scissors:0,rock:0,paper:0}; let probs={}, sum=0; for(let m of moves) probs[m]=(counts[m]||0)+alpha,sum+=probs[m]; for(let m of moves) probs[m]/=sum; return probs;}
 
 function aiChoose(){
-  const n=playerHistory.length;
-  if(n<2 || Math.random()<epsilon) return {move:randomMove(),mode:'random'};
+  const n = playerHistory.length;
+  const prev1 = n >= 1 ? playerHistory[n-1] : null;
+  const prev2 = n >= 2 ? playerHistory[n-2] : null;
+  const prev3 = n >= 3 ? playerHistory[n-3] : null;
 
-  const prev1=playerHistory[n-1], prev2=playerHistory[n-2];
-
-  // 連續同手 → 出剋星
-  if(prev1===prev2){
-    return { move: counter[prev1], mode:'max', probs:{[prev1]:1, [counter[prev1]]:0, [getOtherMove(prev1,counter[prev1])]:0} };
+  // 探索：前兩手不足或隨機探索
+  if(n < 2 || Math.random() < epsilon){
+    return { move: randomMove(), mode: 'random' };
   }
 
-  const pairKey=makePairKey(prev2,prev1);
-  const pairExists=trans2[pairKey] && ((trans2[pairKey].scissors||0)+(trans2[pairKey].rock||0)+(trans2[pairKey].paper||0)>0);
-  let probs, usedOrder;
-  if(pairExists){ probs=getSecondOrderProbs(prev2,prev1); usedOrder=2; } else { probs=getFirstOrderProbs(prev1); usedOrder=1; }
+  // 連續三手同手 → 出剋星
+  if(prev1 && prev2 && prev3 && prev1 === prev2 && prev2 === prev3){
+    return { 
+      move: counter[prev1], 
+      mode: 'max', 
+      probs: { 
+        [prev1]: 1, 
+        [counter[prev1]]: 0, 
+        [moves.find(m => m!==prev1 && m!==counter[prev1])]: 0 
+      } 
+    };
+  }
 
-  if(responseMode==='max'){
-    let maxP=-1, cands=[];
-    for(let m of moves){ if(probs[m]>maxP+1e-12){maxP=probs[m]; cands=[m];} else if(Math.abs(probs[m]-maxP)<1e-12)cands.push(m); }
-    const predicted=cands[Math.floor(Math.random()*cands.length)];
-    return { move: counter[predicted], mode:'max', probs:probs, predicted:predicted, order:usedOrder };
+  // 優先使用二階
+  const pairKey = makePairKey(prev2, prev1);
+  let probs, usedOrder;
+  if(trans2[pairKey] && (trans2[pairKey].scissors + trans2[pairKey].rock + trans2[pairKey].paper > 0)){
+    probs = getSecondOrderProbs(prev2, prev1);
+    usedOrder = 2;
   } else {
-    const aiWeights={scissors:0,rock:0,paper:0};
-    for(let pm of moves) aiWeights[counter[pm]]+=probs[pm];
-    const r=Math.random(), cum=0;
-    let c=0; for(let m of moves){c+=aiWeights[m]; if(r<=c+1e-12)return {move:m,mode:'mixed',probs:probs,aiWeights:aiWeights,order:usedOrder};}
-    return {move:randomMove(),mode:'mixed',probs:probs,aiWeights:aiWeights,order:usedOrder};
+    probs = getFirstOrderProbs(prev1);
+    usedOrder = 1;
+  }
+
+  // 決策模式
+  if(responseMode === 'max'){
+    let maxP = -1, cands = [];
+    for(let m of moves){
+      if(probs[m] > maxP + 1e-12){ maxP = probs[m]; cands = [m]; }
+      else if(Math.abs(probs[m] - maxP) < 1e-12) cands.push(m);
+    }
+    const predicted = cands[Math.floor(Math.random() * cands.length)];
+    return { move: counter[predicted], mode: 'max', probs: probs, predicted: predicted, order: usedOrder };
+  } else {
+    // mixed：把玩家每個可能出的機率轉成 AI 出拳權重
+    const aiWeights = { scissors:0, rock:0, paper:0 };
+    for(let pm of moves) aiWeights[counter[pm]] += probs[pm];
+    const r = Math.random(); let cum = 0;
+    for(let m of moves){ cum += aiWeights[m]; if(r <= cum + 1e-12) return { move: m, mode: 'mixed', probs: probs, aiWeights: aiWeights, order: usedOrder }; }
+    return { move: randomMove(), mode: 'mixed', probs: probs, aiWeights: aiWeights, order: usedOrder };
   }
 }
+
 
 function updateCounts(prev2,prev1,cur){
   if(prev1) trans1[prev1][cur]=(trans1[prev1][cur]||0)+1;
